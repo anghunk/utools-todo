@@ -1,0 +1,27 @@
+{
+  "main": "index.html",
+  "preload": "preload/services.js",
+  "logo": "logo.png",
+  "pluginName": "极简ToDo",
+  "description": "简洁高效的待办事项管理工具，帮助您轻松记录和管理日常任务",
+  "author": "uTools",
+  "homepage": "https://u.tools/",
+  "version": "1.0.0",
+  "development": {
+    "main": "http://localhost:5173"
+  },
+  "features": [
+    {
+      "code": "极简Todo",
+      "explain": "简洁高效的待办事项管理工具",
+      "cmds": [
+        "待办",
+        "todo",
+        "待办列表",
+        "任务",
+        "极简todo",
+        "极简待办"
+      ]
+    }
+  ]
+}
