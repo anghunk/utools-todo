@@ -29,6 +29,31 @@ const adjustHeight = (el) => {
   el.style.height = el.scrollHeight + "px";
 };
 
+// 云同步状态
+const cloudSync = ref({
+  enabled: false,
+  syncing: false,
+  completed: false,
+  checked: false
+});
+
+// 检查云同步状态（保留功能但不显示）
+const checkCloudSyncStatus = () => {
+  try {
+    if (window.services && window.services.checkCloudSyncState) {
+      const state = window.services.checkCloudSyncState();
+      cloudSync.value = {
+        ...state,
+        checked: true
+      };
+      // 如果正在同步，可以在控制台记录信息，但不在界面上显示
+      console.log('云同步状态:', cloudSync.value);
+    }
+  } catch (err) {
+    console.error('检查云同步状态失败:', err);
+  }
+};
+
 // 定义待办项数据结构
 const todos = ref([]);
 const newTodo = ref("");
@@ -75,6 +100,7 @@ const saveTodos = () => {
     // 检查utools是否存在
     if (window.services) {
       window.services.writeTodosFile(JSON.stringify(todos.value));
+      // 保存后不再需要检查云同步状态
     }
   } catch (err) {
     console.error("保存待办列表失败：", err);
@@ -407,11 +433,13 @@ onMounted(() => {
   if (window.utools) {
     window.utools.onPluginEnter(() => {
       loadTodos();
+      // 不再需要检查云同步状态
     });
   }
 
   loadTodos();
   updateDraggableArrays();
+  // 不再需要检查云同步状态
 
   // 监听全局点击事件，在点击编辑框外部时保存编辑
   document.addEventListener("click", (e) => {
@@ -507,11 +535,11 @@ onUnmounted(() => {
       v-if="completedTodosArray.length > 0"
       v-model="completedTodosArray"
       class="todo-list completed-list"
-      :animation="150"
-      ghost-class="ghost-todo"
-      handle=".drag-handle"
-      @start="onStart"
-      @end="onEnd"
+              :animation="150"
+        ghost-class="ghost-todo"
+        handle=".drag-handle"
+        @start="onStart"
+        @end="onEnd"
       @change="handleChange"
       item-key="id"
     >
