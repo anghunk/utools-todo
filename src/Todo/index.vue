@@ -263,7 +263,7 @@ const handleEditKeydown = (e) => {
 
 // 处理新建待办的按键事件
 const handleNewTodoKeydown = (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
+  if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
     e.preventDefault();
     addTodo();
   }

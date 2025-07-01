@@ -5,8 +5,8 @@
   "pluginName": "极简ToDo",
   "description": "简洁高效的待办事项管理工具，帮助您轻松记录和管理日常任务",
   "author": "uTools",
-  "homepage": "https://u.tools/",
-  "version": "1.0.3",
+  "homepage": "https://github.com/ezyshu/utools-todo",
+  "version": "1.0.4",
   "development": {
     "main": "http://localhost:5173"
   },
