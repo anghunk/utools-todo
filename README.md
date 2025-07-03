@@ -1,4 +1,4 @@
-<img src="./public/logo.png" style="width:50px">
+<img src="./public/logo.png" style="width:60px">
 
 ## 极简ToDo - uTools 插件
 
