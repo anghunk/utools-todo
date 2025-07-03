@@ -83,5 +83,78 @@ window.services = {
       console.error('检查云同步状态失败:', err)
       return { enabled: false, syncing: false, completed: false }
     }
+  },
+  // 云同步支持归档功能
+  syncArchivedTodos: function() {
+    try {
+      // 从dbStorage获取归档数据
+      const archived = window.utools.dbStorage.getItem('todos-archived')
+      if (archived) {
+        return JSON.stringify(archived)
+      }
+      return '[]'
+    } catch (err) {
+      console.error('获取归档数据失败:', err)
+      return '[]'
+    }
+  },
+  
+  // 将归档数据同步到云
+  saveArchivedToCloud: function(archivedJson) {
+    try {
+      const archivedData = JSON.parse(archivedJson)
+      window.utools.dbStorage.setItem('todos-archived', archivedData)
+      return true
+    } catch (err) {
+      console.error('保存归档数据到云失败:', err)
+      return false
+    }
+  },
+  // 写入设置
+  writeSettingsFile: function (content) {
+    try {
+      fs.writeFileSync(path.join(window.utools.getPath('userData'), 'todos-settings.json'), content, 'utf8')
+      return true
+    } catch (e) {
+      console.error('写入设置失败', e)
+      return false
+    }
+  },
+  // 读取设置
+  readSettingsFile: function () {
+    try {
+      const settingsPath = path.join(window.utools.getPath('userData'), 'todos-settings.json')
+      if (fs.existsSync(settingsPath)) {
+        return fs.readFileSync(settingsPath, 'utf8')
+      }
+      return ''
+    } catch (e) {
+      console.error('读取设置失败', e)
+      return ''
+    }
+  },
+  // 写入归档待办
+  writeArchivedTodosFile: function (content) {
+    try {
+      const archivedPath = path.join(window.utools.getPath('userData'), 'todos-archived.json')
+      fs.writeFileSync(archivedPath, content, 'utf8')
+      return true
+    } catch (e) {
+      console.error('写入归档待办失败', e)
+      return false
+    }
+  },
+  // 读取归档待办
+  readArchivedTodosFile: function () {
+    try {
+      const archivedPath = path.join(window.utools.getPath('userData'), 'todos-archived.json')
+      if (fs.existsSync(archivedPath)) {
+        return fs.readFileSync(archivedPath, 'utf8')
+      }
+      return ''
+    } catch (e) {
+      console.error('读取归档待办失败', e)
+      return ''
+    }
   }
 }

@@ -34,8 +34,91 @@ const cloudSync = ref({
   enabled: false,
   syncing: false,
   completed: false,
-  checked: false
+  checked: false,
 });
+
+// 设置选项
+const settings = ref({
+  autoCleanEnabled: false, // 是否启用自动清理
+  autoCleanDays: 30, // 自动清理多少天前的已完成待办
+  autoCleanOnStartup: true, // 是否在启动时执行自动清理
+  showArchiveOption: true, // 是否显示归档选项
+  lastCleanTime: null, // 上次清理时间
+});
+
+// 归档的待办项
+const archivedTodos = ref([]);
+
+// 加载设置
+const loadSettings = () => {
+  try {
+    if (window.services) {
+      const settingsContent = window.services.readSettingsFile();
+      if (settingsContent) {
+        settings.value = { ...settings.value, ...JSON.parse(settingsContent) };
+      }
+    }
+  } catch (err) {
+    console.error("读取设置失败：", err);
+  }
+};
+
+// 保存设置
+const saveSettings = () => {
+  try {
+    if (window.services) {
+      window.services.writeSettingsFile(JSON.stringify(settings.value));
+    }
+  } catch (err) {
+    console.error("保存设置失败：", err);
+  }
+};
+
+// 加载归档的待办项
+const loadArchivedTodos = () => {
+  try {
+    if (window.services) {
+      let archivedContent = "";
+
+      // 优先从云同步获取
+      if (window.services.syncArchivedTodos) {
+        archivedContent = window.services.syncArchivedTodos();
+      }
+
+      // 如果云同步没有数据，尝试从本地获取
+      if (!archivedContent || archivedContent === "[]") {
+        archivedContent = window.services.readArchivedTodosFile();
+      }
+
+      if (archivedContent) {
+        archivedTodos.value = JSON.parse(archivedContent);
+      }
+    }
+  } catch (err) {
+    console.error("读取归档待办失败：", err);
+  }
+};
+
+// 保存归档的待办项
+const saveArchivedTodos = () => {
+  try {
+    if (window.services) {
+      // 本地存储
+      window.services.writeArchivedTodosFile(
+        JSON.stringify(archivedTodos.value)
+      );
+
+      // 云同步存储
+      if (window.services.saveArchivedToCloud) {
+        window.services.saveArchivedToCloud(
+          JSON.stringify(archivedTodos.value)
+        );
+      }
+    }
+  } catch (err) {
+    console.error("保存归档待办失败：", err);
+  }
+};
 
 // 检查云同步状态（保留功能但不显示）
 const checkCloudSyncStatus = () => {
@@ -44,13 +127,13 @@ const checkCloudSyncStatus = () => {
       const state = window.services.checkCloudSyncState();
       cloudSync.value = {
         ...state,
-        checked: true
+        checked: true,
       };
       // 如果正在同步，可以在控制台记录信息，但不在界面上显示
-      console.log('云同步状态:', cloudSync.value);
+      console.log("云同步状态:", cloudSync.value);
     }
   } catch (err) {
-    console.error('检查云同步状态失败:', err);
+    console.error("检查云同步状态失败:", err);
   }
 };
 
@@ -93,6 +176,48 @@ const contextMenu = ref({
   y: 0,
   todoId: null,
 });
+
+// 设置菜单状态
+const settingsMenu = ref({
+  visible: false,
+});
+
+// 归档查看状态
+const archiveView = ref({
+  visible: false,
+});
+
+// 显示设置菜单
+const showSettingsMenu = () => {
+  settingsMenu.value.visible = true;
+};
+
+// 隐藏设置菜单（不保存设置）
+const hideSettingsMenu = () => {
+  settingsMenu.value.visible = false;
+  console.log("关闭设置菜单");
+};
+
+// 保存设置并关闭菜单
+const saveSettingsAndClose = () => {
+  saveSettings(); // 保存设置
+  settingsMenu.value.visible = false;
+  console.log("设置已保存");
+
+  // 显示保存成功的提示
+  alert("设置已保存！");
+};
+
+// 显示归档查看
+const showArchiveView = () => {
+  archiveView.value.visible = true;
+};
+
+// 隐藏归档查看
+const hideArchiveView = () => {
+  archiveView.value.visible = false;
+  console.log(`归档视图已关闭，当前有 ${archivedTodos.value.length} 个归档项`);
+};
 
 // 保存待办列表到文件
 const saveTodos = () => {
@@ -174,8 +299,34 @@ const addTodo = () => {
   });
 };
 
-// 删除待办
+// 删除待办（实际移入归档）
 const removeTodo = (id) => {
+  // 找到要删除的待办项
+  const todoToArchive = todos.value.find((todo) => todo.id === id);
+
+  if (!todoToArchive) {
+    console.error(`未找到ID为 ${id} 的待办项`);
+    return;
+  }
+
+  console.log(`将待办项移入归档: ${todoToArchive.content}`);
+
+  // 确保待办项有完成时间
+  if (!todoToArchive.completedAt) {
+    todoToArchive.completedAt = new Date().toISOString();
+  }
+
+  // 记录原始完成状态，但不修改它
+  // 保留原始状态以便后续恢复
+  console.log(`归档待办项 ${todoToArchive.content} 的原始完成状态: ${todoToArchive.completed}`);
+  
+  // 不再强制标记为已完成
+  // 保持原有状态，让恢复功能可以正确判断
+
+  // 将待办项添加到归档
+  archivedTodos.value.unshift(todoToArchive);
+
+  // 从待办列表中移除
   todos.value = todos.value.filter((todo) => todo.id !== id);
 
   // 更新所有待办的顺序
@@ -184,20 +335,40 @@ const removeTodo = (id) => {
   // 更新拖拽数组
   updateDraggableArrays();
 
+  // 保存更改
   saveTodos();
+  saveArchivedTodos();
 };
 
 // 切换待办状态
 const toggleTodo = (id) => {
   const todo = todos.value.find((todo) => todo.id === id);
   if (todo) {
-    todo.completed = !todo.completed;
+    const wasCompleted = todo.completed;
+    todo.completed = !wasCompleted;
 
-    // 重新分配序号
+    // 如果标记为已完成，记录完成时间
     if (todo.completed) {
+      // 始终为新完成的待办项设置当前时间
+      todo.completedAt = new Date().toISOString();
+      console.log(
+        `待办项 ${todo.content} 标记为已完成，完成时间: ${todo.completedAt}`
+      );
+
+      // 获取当前最小的已完成项序号
+      const minCompletedOrder = Math.min(
+        ...todos.value
+          .filter((t) => t.completed && t.id !== id)
+          .map((t) => t.order),
+        1000 // 默认值
+      );
       // 设置为已完成项的最前面
-      todo.order = 1000;
+      todo.order = minCompletedOrder - 1;
     } else {
+      // 取消完成状态时，移除完成时间
+      console.log(`待办项 ${todo.content} 标记为未完成，移除完成时间`);
+      delete todo.completedAt;
+
       // 设置为未完成项的最前面
       todo.order = 0;
     }
@@ -389,11 +560,14 @@ const hideContextMenuOnContext = (e) => {
   }
 };
 
-// 菜单操作 - 删除
+// 菜单操作 - 删除（移入归档）
 const handleDeleteTodo = () => {
   if (contextMenu.value.todoId) {
-    removeTodo(contextMenu.value.todoId);
-    hideContextMenu();
+    const todo = todos.value.find((t) => t.id === contextMenu.value.todoId);
+    if (todo) {
+      removeTodo(contextMenu.value.todoId);
+      hideContextMenu();
+    }
   }
 };
 
@@ -427,19 +601,271 @@ watch(
   { deep: true }
 );
 
+// 全局键盘事件处理函数
+const handleGlobalKeydown = (e) => {
+  // 如果按下Tab键，并且当前没有处于输入或编辑状态
+  if (
+    e.key === "Tab" &&
+    !editingTodo.value &&
+    document.activeElement.tagName !== "TEXTAREA"
+  ) {
+    e.preventDefault();
+    // 聚焦到输入框
+    const textarea = document.querySelector(".new-todo-input");
+    if (textarea) {
+      textarea.focus();
+    }
+  }
+};
+
+// 自动清理旧的已完成待办项
+const cleanOldCompletedTodos = () => {
+  // 临时记录是否为手动清理调用
+  const isManualClean = settings.value._manualClean === true;
+  // 重置手动清理标志
+  settings.value._manualClean = false;
+
+  // 检查是否启用自动清理（手动清理时会跳过此检查）
+  if (!settings.value.autoCleanEnabled && !isManualClean) {
+    console.log("自动清理未启用");
+    return;
+  }
+
+  console.log("开始清理旧待办项", isManualClean ? "(手动触发)" : "");
+
+  // 确保天数是有效的数字
+  const cleanDays = Math.max(1, parseInt(settings.value.autoCleanDays) || 30);
+  console.log(`清理天数设置: ${cleanDays}天`);
+
+  const now = new Date();
+  const cutoffDate = new Date();
+  cutoffDate.setDate(now.getDate() - cleanDays);
+
+  console.log(`清理截止日期: ${cutoffDate.toISOString()}`);
+
+  // 为所有已完成但没有完成时间的待办项添加完成时间
+  todos.value.forEach((todo) => {
+    if (todo.completed && !todo.completedAt) {
+      // 为旧的已完成项设置完成时间为截止日期之前，以便它们被归档
+      todo.completedAt = new Date(
+        now.getTime() - (cleanDays + 1) * 24 * 60 * 60 * 1000
+      ).toISOString();
+      console.log(
+        `为待办项添加完成时间: ${todo.content}, 设置为: ${todo.completedAt}`
+      );
+    }
+  });
+
+  // 找出需要归档的待办项
+  const todosToArchive = todos.value.filter((todo) => {
+    if (!todo.completed) return false;
+    if (!todo.completedAt) return false;
+
+    const completedDate = new Date(todo.completedAt);
+    const shouldArchive = completedDate < cutoffDate;
+
+    if (shouldArchive) {
+      console.log(`待归档: ${todo.content}, 完成于 ${todo.completedAt}`);
+    }
+
+    return shouldArchive;
+  });
+
+  console.log(`找到 ${todosToArchive.length} 个需要归档的待办项`);
+
+  if (todosToArchive.length === 0) {
+    console.log("没有需要归档的待办项");
+    return;
+  }
+
+  // 将旧待办项添加到归档
+  archivedTodos.value = [...archivedTodos.value, ...todosToArchive];
+
+  console.log(`归档后总数: ${archivedTodos.value.length}`);
+
+  // 从当前列表中移除
+  todos.value = todos.value.filter((todo) => {
+    // 保留未完成的和完成时间晚于截止日期的
+    if (!todo.completed) return true;
+    if (!todo.completedAt) return true;
+
+    const completedDate = new Date(todo.completedAt);
+    return completedDate >= cutoffDate;
+  });
+
+  // 更新拖拽数组
+  updateDraggableArrays();
+
+  // 保存更改
+  saveTodos();
+  saveArchivedTodos();
+
+  // 更新最后清理时间
+  settings.value.lastCleanTime = now.toISOString();
+  saveSettings();
+
+  console.log(`已归档 ${todosToArchive.length} 个旧待办项`);
+};
+
+// 手动触发清理
+const manualCleanOldTodos = () => {
+  // 设置手动清理标志
+  settings.value._manualClean = true;
+
+  // 确保所有已完成项都有完成时间
+  let addedCompletionTime = false;
+  todos.value.forEach((todo) => {
+    if (todo.completed && !todo.completedAt) {
+      // 设置完成时间为比截止日期更早一天
+      const daysAgo = parseInt(settings.value.autoCleanDays) || 30;
+      const completedDate = new Date();
+      completedDate.setDate(completedDate.getDate() - (daysAgo + 1));
+      todo.completedAt = completedDate.toISOString();
+      addedCompletionTime = true;
+    }
+  });
+
+  if (addedCompletionTime) {
+    saveTodos();
+  }
+
+  // 执行清理
+  cleanOldCompletedTodos();
+
+  // 显示清理结果的反馈
+  const cleanDays = Math.max(1, parseInt(settings.value.autoCleanDays) || 30);
+  const archivedCount = archivedTodos.value.length;
+
+  // 检查是否有项目被归档
+  if (archivedCount > 0) {
+    alert(
+      `清理完成！已将${cleanDays}天前的已完成待办移至归档。\n当前归档共有${archivedCount}个项目。`
+    );
+  } else {
+    alert(
+      `没有找到${cleanDays}天前的已完成待办。\n如需归档当前的已完成项，请调整设置中的天数。`
+    );
+  }
+};
+
+// 手动查看归档
+const viewArchivedTodos = () => {
+  // 打开归档查看模态框
+  archiveView.value.visible = true;
+  console.log("查看归档待办项", archivedTodos.value);
+};
+
+// 从归档中恢复待办项
+const restoreFromArchive = (todo) => {
+  // 获取原始完成状态
+  const wasCompleted = !!todo.completed;
+  
+  // 确认对话框 - 根据原始完成状态显示不同消息
+  const confirmMessage = wasCompleted 
+    ? `确定要将"${todo.content}"恢复到已完成列表吗？` 
+    : `确定要将"${todo.content}"恢复到待办列表吗？`;
+    
+  if (!confirm(confirmMessage)) {
+    return;
+  }
+
+  console.log(`从归档恢复待办项: ${todo.content}, 完成状态: ${wasCompleted}`);
+
+  // 从归档中移除
+  archivedTodos.value = archivedTodos.value.filter((t) => t.id !== todo.id);
+
+  if (wasCompleted) {
+    // 如果原本是已完成状态，保持已完成
+    // 如果没有完成时间，则添加一个较近的完成时间
+    if (!todo.completedAt) {
+      // 设置为昨天完成，确保不会立即被再次归档
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      todo.completedAt = yesterday.toISOString();
+    }
+    
+    // 设置为已完成项的最前面
+    const minCompletedOrder = Math.min(
+      ...todos.value.filter((t) => t.completed).map((t) => t.order),
+      1000 // 默认值
+    );
+    todo.order = minCompletedOrder - 1;
+  } else {
+    // 如果原本是未完成状态，恢复为未完成
+    todo.completed = false;
+    delete todo.completedAt; // 移除完成时间
+    
+    // 设置为未完成项的最前面
+    todo.order = -1; // 设置为小于所有现有项的顺序
+    
+    // 重新排序未完成项
+    todos.value
+      .filter(t => !t.completed)
+      .forEach((t, index) => {
+        t.order = index + 1;
+      });
+  }
+
+  // 添加到当前待办列表
+  todos.value.unshift(todo);
+
+  // 更新拖拽数组
+  updateDraggableArrays();
+
+  // 保存更改
+  saveTodos();
+  saveArchivedTodos();
+};
+
+// 彻底删除所有归档项
+const clearAllArchived = () => {
+  // 确认对话框，要求二次确认
+  if (
+    !confirm(
+      `确定要永久删除所有归档项吗？此操作无法撤销，共 ${archivedTodos.value.length} 项将被删除。`
+    )
+  ) {
+    return;
+  }
+
+  console.log(`永久删除所有归档项: ${archivedTodos.value.length} 项`);
+
+  // 清空归档
+  archivedTodos.value = [];
+
+  // 保存归档
+  saveArchivedTodos();
+
+};
+
 // 组件加载时读取待办列表
 onMounted(() => {
   // 安全地注册插件进入事件
   if (window.utools) {
     window.utools.onPluginEnter(() => {
       loadTodos();
-      // 不再需要检查云同步状态
+      loadSettings();
+      loadArchivedTodos();
+
+      // 如果启用了启动时自动清理，执行清理
+      if (
+        settings.value.autoCleanEnabled &&
+        settings.value.autoCleanOnStartup
+      ) {
+        cleanOldCompletedTodos();
+      }
     });
   }
 
   loadTodos();
+  loadSettings();
+  loadArchivedTodos();
   updateDraggableArrays();
-  // 不再需要检查云同步状态
+
+  // 如果启用了启动时自动清理，执行清理
+  if (settings.value.autoCleanEnabled && settings.value.autoCleanOnStartup) {
+    cleanOldCompletedTodos();
+  }
 
   // 监听全局点击事件，在点击编辑框外部时保存编辑
   document.addEventListener("click", (e) => {
@@ -447,17 +873,56 @@ onMounted(() => {
       saveEdit();
     }
   });
+
+  // 添加全局键盘事件监听
+  document.addEventListener("keydown", handleGlobalKeydown);
+
+  // 添加全局ESC键监听
+  document.addEventListener("keydown", handleGlobalEscape);
 });
+
+// 全局按键处理 - 用于关闭模态框
+const handleGlobalEscape = (e) => {
+  if (e.key === "Escape") {
+    // 如果设置模态框可见，关闭它（不保存更改）
+    if (settingsMenu.value.visible) {
+      hideSettingsMenu();
+    }
+    // 如果归档查看可见，关闭它
+    else if (archiveView.value.visible) {
+      hideArchiveView();
+    }
+  }
+};
+
+// ESC键监听在组件挂载时添加
 
 // 组件卸载时清理事件监听
 onUnmounted(() => {
   document.removeEventListener("click", hideContextMenu);
   document.removeEventListener("contextmenu", hideContextMenuOnContext);
+  document.removeEventListener("keydown", handleGlobalKeydown);
+  document.removeEventListener("keydown", handleGlobalEscape);
 });
 </script>
 
 <template>
   <div class="todo-app" @contextmenu.self="hideContextMenu">
+    <!-- 顶部工具栏 -->
+    <div class="toolbar">
+      <button class="toolbar-button" @click="showSettingsMenu" title="设置">
+        <span class="setting-icon">⚙️</span>
+      </button>
+      <button
+        v-if="settings.showArchiveOption"
+        class="toolbar-button"
+        @click="showArchiveView"
+        title="查看归档"
+      >
+        <span class="archive-icon">📦</span>
+      </button>
+    </div>
+
     <!-- 添加待办表单 -->
     <div class="add-todo">
       <textarea
@@ -491,6 +956,10 @@ onUnmounted(() => {
           @contextmenu.stop="showContextMenu($event, todo.id)"
         >
           <div class="todo-content" @dblclick="startEdit(todo)">
+            <div class="drag-handle">
+              <span class="drag-icon">≡</span>
+            </div>
+
             <input
               type="checkbox"
               :checked="todo.completed"
@@ -513,10 +982,6 @@ onUnmounted(() => {
               v-focus
               v-auto-height
             ></textarea>
-
-            <div class="drag-handle">
-              <span class="drag-icon">≡</span>
-            </div>
           </div>
         </div>
       </template>
@@ -535,11 +1000,11 @@ onUnmounted(() => {
       v-if="completedTodosArray.length > 0"
       v-model="completedTodosArray"
       class="todo-list completed-list"
-              :animation="150"
-        ghost-class="ghost-todo"
-        handle=".drag-handle"
-        @start="onStart"
-        @end="onEnd"
+      :animation="150"
+      ghost-class="ghost-todo"
+      handle=".drag-handle"
+      @start="onStart"
+      @end="onEnd"
       @change="handleChange"
       item-key="id"
     >
@@ -583,6 +1048,132 @@ onUnmounted(() => {
       </template>
     </draggable>
 
+    <!-- 设置菜单 -->
+    <div
+      v-if="settingsMenu.visible"
+      class="settings-modal"
+      @click.self="hideSettingsMenu"
+    >
+      <div class="settings-content">
+        <div class="settings-header">
+          <h2>设置</h2>
+          <button class="close-button" @click="hideSettingsMenu">×</button>
+        </div>
+        <div class="settings-body">
+          <div class="setting-item">
+            <label>
+              <input type="checkbox" v-model="settings.autoCleanEnabled" />
+              1. 启用清理已完成待办功能
+            </label>
+          </div>
+          <div class="setting-item" v-if="settings.autoCleanEnabled">
+            <label>
+              自动清理多少天前的已完成待办:
+              <input
+                type="number"
+                v-model.number="settings.autoCleanDays"
+                min="1"
+                max="365"
+              />
+            </label>
+          </div>
+          <div class="setting-item" v-if="settings.autoCleanEnabled">
+            <label>
+              <input type="checkbox" v-model="settings.autoCleanOnStartup" />
+              在启动时执行自动清理
+            </label>
+          </div>
+          <div class="setting-tip" v-if="settings.autoCleanEnabled">
+            <p>
+              注意:
+              只有设置了完成时间的待办项才会被清理，旧的已完成项可能需要手动点击"立即清理"来添加完成时间并归档。
+            </p>
+          </div>
+          <div class="setting-item">
+            <label>
+              <input type="checkbox" v-model="settings.showArchiveOption" />
+              2. 显示归档选项
+            </label>
+          </div>
+          <div class="setting-actions">
+            <button class="button primary" @click="saveSettingsAndClose">
+              保存
+            </button>
+            <button
+              v-if="settings.autoCleanEnabled"
+              class="button warnning"
+              @click="manualCleanOldTodos"
+              :disabled="completedTodosArray.length === 0"
+            >
+              立即清理
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 归档查看 -->
+    <div
+      v-if="archiveView.visible"
+      class="archive-modal"
+      @click.self="hideArchiveView"
+    >
+      <div class="archive-content">
+        <div class="archive-header">
+          <h2>
+            归档待办
+            <span class="archive-count" v-if="archivedTodos.length > 0"
+              >({{ archivedTodos.length }})</span
+            >
+          </h2>
+          <div class="archive-header-actions">
+            <button
+              v-if="archivedTodos.length > 0"
+              class="archive-clear-btn"
+              @click="clearAllArchived"
+              title="彻底删除所有归档项"
+            >
+              彻底删除全部
+            </button>
+            <button class="close-button" @click="hideArchiveView">×</button>
+          </div>
+        </div>
+        <div class="archive-body">
+          <div v-if="archivedTodos.length === 0" class="no-archived">
+            <p>暂无归档的待办项</p>
+          </div>
+          <div v-else class="archived-list">
+            <div
+              v-for="todo in archivedTodos"
+              :key="todo.id"
+              class="archived-item"
+            >
+              <div class="archived-content">
+                <span class="archived-text">{{ todo.content }}</span>
+                <span class="archived-date">
+                  完成于:
+                  {{
+                    todo.completedAt
+                      ? new Date(todo.completedAt).toLocaleDateString()
+                      : "未知时间"
+                  }}
+                </span>
+              </div>
+              <div class="archived-actions">
+                <button
+                  class="archive-action-btn restore"
+                  @click="restoreFromArchive(todo)"
+                  :title="todo.completed ? '恢复到已完成列表' : '恢复到待办列表'"
+                >
+                  <span>恢复</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 右键菜单 -->
     <div
       v-if="contextMenu.visible"
@@ -604,7 +1195,7 @@ onUnmounted(() => {
         >
       </div>
       <div class="context-menu-item delete" @click="handleDeleteTodo">
-        <span>删除</span>
+        <span>归档</span>
       </div>
     </div>
   </div>
@@ -826,6 +1417,274 @@ onUnmounted(() => {
   background-color: rgba(220, 53, 69, 0.1);
 }
 
+/* 顶部工具栏 */
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9;
+}
+
+.toolbar-button {
+  width: 40px;
+  height: 40px;
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 5px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+}
+
+.toolbar-button:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* 设置模态框 */
+.settings-modal,
+.archive-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  cursor: pointer;
+}
+
+.settings-content,
+.archive-content {
+  cursor: default;
+}
+
+.settings-content,
+.archive-content {
+  background-color: #fff;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-header,
+.archive-header {
+  padding: 15px 20px;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.archive-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.archive-clear-btn {
+  padding: 0 8px;
+  border: none;
+  border-radius: 4px;
+  background-color: #dc3545;
+  color: white;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.archive-clear-btn:hover {
+  background-color: #c82333;
+}
+
+.settings-header h2,
+.archive-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.archive-count {
+  font-size: 14px;
+  font-weight: normal;
+  color: #666;
+  margin-left: 4px;
+}
+
+.close-button {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0 5px;
+  line-height: 1;
+  color: #333;
+}
+
+.settings-body,
+.archive-body {
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.setting-item {
+  margin-bottom: 15px;
+}
+
+.setting-item label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.setting-tip {
+  margin: 0 0 15px;
+  padding: 8px 12px;
+  background-color: #fff8e1;
+  border-left: 3px solid #ffca28;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.setting-tip p {
+  margin: 0;
+  color: #795548;
+}
+
+.setting-item input[type="number"] {
+  width: 60px;
+  padding: 5px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.setting-actions {
+  margin-top: 20px;
+  display: flex;
+  gap: 10px;
+}
+
+.button {
+  padding: 0 15px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  background-color: #f0f0f0;
+  transition: all 0.2s;
+}
+
+.button.primary {
+  background-color: #42b983;
+  color: white;
+}
+
+.button.warnning {
+  background-color: #e00;
+  color: white;
+}
+
+.button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 归档列表样式 */
+.archived-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.archived-item {
+  padding: 12px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+  border-left: 3px solid #aaa;
+}
+
+.archived-content {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+}
+
+.archived-text {
+  font-size: 14px;
+}
+
+.archived-date {
+  font-size: 12px;
+  color: #888;
+}
+
+.archived-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.archived-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.archive-action-btn {
+  padding: 0 8px;
+  border: none;
+  border-radius: 3px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.archive-action-btn.restore {
+  background-color: #4285f4;
+  color: white;
+}
+
+.archive-action-btn.delete {
+  background-color: #dc3545;
+  color: white;
+}
+
+.archive-action-btn:hover {
+  opacity: 0.8;
+}
+
+.no-archived {
+  text-align: center;
+  padding: 30px 0;
+  color: #888;
+}
+
 /* 深色模式支持 */
 @media (prefers-color-scheme: dark) {
   .todo-app {
@@ -860,8 +1719,8 @@ onUnmounted(() => {
   }
 
   .todo-content input[type="checkbox"]:checked {
-    background-color: #2B70B9;
-    border-color: #2B70B9;
+    background-color: #2b70b9;
+    border-color: #2b70b9;
   }
 
   .drag-icon {
@@ -894,6 +1753,74 @@ onUnmounted(() => {
 
   .context-menu-item.delete:hover {
     background-color: rgba(220, 53, 69, 0.2);
+  }
+
+  .toolbar-button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .settings-content,
+  .archive-content {
+    background-color: #3a4d5f;
+    border: 1px solid #2c3e50;
+  }
+
+  .settings-header,
+  .archive-header {
+    border-bottom: 1px solid #2c3e50;
+  }
+
+  .setting-item input[type="number"] {
+    background-color: #2c3e50;
+    border-color: #2c3e50;
+    color: #f8f9fa;
+  }
+
+  .setting-tip {
+    background-color: #2c3e50;
+    border-left-color: #f39c12;
+  }
+
+  .setting-tip p {
+    color: #ddd;
+  }
+
+  .button {
+    background-color: #2c3e50;
+    color: #f8f9fa;
+  }
+
+  .button.primary {
+    background-color: #2b70b9;
+  }
+
+  .archived-item {
+    background-color: #2c3e50;
+    border-left: 3px solid #4d6278;
+  }
+
+  .archived-date {
+    color: #adb5bd;
+  }
+
+  .archive-action-btn.restore {
+    background-color: #2b70b9;
+  }
+
+  .archive-action-btn.delete {
+    background-color: #a03;
+  }
+
+  .archive-count {
+    color: #adb5bd;
+  }
+
+  .archive-clear-btn {
+    background-color: #a03;
+  }
+
+  .archive-clear-btn:hover {
+    background-color: #bf0a30;
   }
 }
 </style>
