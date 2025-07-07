@@ -2,6 +2,8 @@
 
 ## 极简ToDo - uTools 插件
 
+[下载地址](https://www.u-tools.cn/plugins/detail/%E6%9E%81%E7%AE%80ToDo/)
+
 一个简洁、高效的待办事项管理工具，帮助你轻松组织和完成任务。
 
 ## 功能特点
